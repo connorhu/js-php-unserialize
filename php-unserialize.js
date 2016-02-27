@@ -4,6 +4,7 @@
     // Public API
     exports.unserialize = unserialize;
     exports.unserializeSession = unserializeSession;
+    exports.toNonAssociative = toNonAssociative;
 
     /**
     * Unserialize data taken from PHP's serialize() output
@@ -15,7 +16,8 @@
     * @return unserialized data
     * @throws
     */
-    function unserialize (data) {
+    function unserialize (data, objMap) {
+        var objectMap = objMap || {};
         // http://kevin.vanzonneveld.net
         // +     original by: Arpad Ray (mailto:arpad@php.net)
         // +     improved by: Pedro Tainha (http://www.pedrotainha.com)
@@ -232,12 +234,28 @@
                 throw new Error('invalid body defn: ' + JSON.stringify([body, offset, res[1], data.slice(offset-1, offset+10)]));
             }
             body = body.slice(1, -1);
-            try {
-                body = _unserialize(body, 0)[2];
-            } catch (e) {
+
+            var content = false;
+
+            if (objectMap[classname]) {
+                content = new (objectMap[classname])()
+                if (content.unserialize) {
+                    content.unserialize(body)
+                }
+            }
+            else {
+                console.log('unknown class: '+ classname)
+            }
+            if (content === false) {
+                try {
+                    body = _unserialize(body, 0)[2];
+                } catch (e) {
+                }
+
+                content = {name: classname, body: body}
             }
 
-            return [offset + parseInt(res[1]) + 1, {name: classname, body: body}];
+            return [offset + parseInt(res[1]) + 1, content];
         };
 
         function getString(data, offset) {
@@ -270,7 +288,7 @@
     * @return unserialized data
     * @throws
     */
-    function unserializeSession (input) {
+    function unserializeSession (input, objMap) {
         return input.split(/\|/).reduce(function (output, part, index, parts) {
             // First part = $key
             if (index === 0) {
@@ -278,14 +296,14 @@
             }
             // Last part = $someSerializedStuff
             else if (index === parts.length - 1) {
-                output[output._currKey] = unserialize(part);
+                output[output._currKey] = unserialize(part, objMap);
                 delete output._currKey;
             }
             // Other output = $someSerializedStuff$key
             else {
                 var match = part.match(/^((?:[\s\S]*?[;\}])+)([^;\}]+?)$/);
                 if (match) {
-                    output[output._currKey] = unserialize(match[1]);
+                    output[output._currKey] = unserialize(match[1], objMap);
                     output._currKey = match[2];
                 } else {
                     throw new Error('Parse error on part "' + part + '"');
